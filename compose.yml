@@ -7,9 +7,10 @@
 #     di folder ini tidak menyentuh proyek lain.
 #   - TIDAK ADA `ports:`. Gateway cuma butuh koneksi KELUAR (API LLM + Telegram polling).
 #     Docker mem-bypass ufw/iptables, jadi port yang dipublish = langsung terbuka ke internet.
-#   - Dashboard hanya dijangkau caddy_ssl lewat jaringan KHUSUS "hermes-edge" (isinya cuma dashboard
-#     dan caddy_ssl). Sengaja bukan "proxy": tab Chat dashboard menjalankan agent di container ini,
-#     dan di "proxy" ia bisa memanggil banksampahku-api / banksampahku-web.
+#   - Gateway + dashboard SATU container: dashboard hanya bisa melihat status gateway kalau berbagi ruang
+#     proses. Kalau dipisah, statusnya selalu "stopped" walaupun bot hidup.
+#   - Hanya dijangkau caddy_ssl lewat jaringan KHUSUS "hermes-edge" (isinya cuma container ini dan caddy_ssl).
+#     Sengaja bukan "proxy": di sana agent bisa memanggil banksampahku-api / banksampahku-web.
 #   - JANGAN mount /var/run/docker.sock: agent yang bisa menjalankan perintah akan jadi
 #     root di host → bisa membaca/menghapus database banksampah & ResikforSchools.
 #
@@ -17,64 +18,48 @@
 #   docker compose up -d            # gateway + dashboard
 name: hermes
 
-x-hermes-common: &hermes-common
-  image: ${HERMES_IMAGE:-nousresearch/hermes-agent:stable}
-  restart: unless-stopped
-  volumes:
-    # HERMES_HOME. Berisi .env (API key), config.yaml, memories/, sessions/, state.db
-    - ./data:/opt/data
-    # Kunci akses bot (managed/.env): menang atas data/.env dan read-only, jadi agent tidak bisa mengubahnya.
-    # create_host_path: false → compose menolak start kalau folder managed/ belum dibuat.
-    - type: bind
-      source: ./managed
-      target: /etc/hermes
-      read_only: true
-      bind:
-        create_host_path: false
-  environment:
-    # Container start sebagai root lalu turun ke user ini; samakan dengan pemilik ./data
-    HERMES_UID: ${HERMES_UID:?isi HERMES_UID di .env (hasil `id -u`)}
-    HERMES_GID: ${HERMES_GID:?isi HERMES_GID di .env (hasil `id -g`)}
-    TZ: Asia/Jakarta
-  logging:
-    driver: json-file
-    options:
-      max-size: "10m" # disk VPS kecil: log tidak boleh tumbuh tanpa batas
-      max-file: "3"
-
 services:
   gateway:
-    <<: *hermes-common
+    image: ${HERMES_IMAGE:-nousresearch/hermes-agent:stable}
+    restart: unless-stopped
     command: ["gateway", "run"]
-    # Siapa yang boleh chat: lihat managed/.env (bukan environment: di sini, karena data/.env menimpanya).
-    # Batas sumber daya agar Hermes tidak merebut RAM/CPU dari MySQL banksampah
-    # (innodb-buffer-pool 1200M) & PostgreSQL ResikforSchools. Sesuaikan di .env.
-    mem_limit: ${HERMES_MEM_LIMIT:-2g}
-    cpus: ${HERMES_CPUS:-1.0}
-    shm_size: 1g # dibutuhkan Chromium bila tool browser dipakai
-    networks:
-      - egress
-
-  dashboard:
-    <<: *hermes-common
-    command: ["dashboard", "--host", "0.0.0.0", "--no-open"]
+    volumes:
+      # HERMES_HOME. Berisi .env (API key), config.yaml, memories/, sessions/, state.db
+      - ./data:/opt/data
+      # Kunci akses bot (managed/.env): menang atas data/.env dan read-only, jadi agent tidak bisa mengubahnya.
+      # create_host_path: false → compose menolak start kalau folder managed/ belum dibuat.
+      - type: bind
+        source: ./managed
+        target: /etc/hermes
+        read_only: true
+        bind:
+          create_host_path: false
     environment:
-      HERMES_UID: ${HERMES_UID}
-      HERMES_GID: ${HERMES_GID}
+      # Container start sebagai root lalu turun ke user ini; samakan dengan pemilik ./data
+      HERMES_UID: ${HERMES_UID:?isi HERMES_UID di .env (hasil `id -u`)}
+      HERMES_GID: ${HERMES_GID:?isi HERMES_GID di .env (hasil `id -g`)}
       TZ: Asia/Jakarta
-      # Dashboard menyimpan API key → WAJIB auth. Tanpa ini Hermes menolak start
+      # Dashboard ikut jalan di container ini (port 9119, tidak dipublish ke host)
+      HERMES_DASHBOARD: "1"
+      # Dashboard menyimpan API key → WAJIB auth. Tanpa ini Hermes menolak menjalankan dashboard
       # (bind non-loopback tanpa auth = fail closed). Compose juga menolak start bila kosong.
       HERMES_DASHBOARD_BASIC_AUTH_USERNAME: ${DASHBOARD_USER:?isi DASHBOARD_USER di .env}
       HERMES_DASHBOARD_BASIC_AUTH_PASSWORD: ${DASHBOARD_PASSWORD:?isi DASHBOARD_PASSWORD di .env (openssl rand -hex 24)}
-    mem_limit: 1g # tab Chat menjalankan agent di container ini
-    cpus: 0.5
-    depends_on:
-      - gateway
+    # Siapa yang boleh chat: lihat managed/.env (bukan environment: di sini, karena data/.env menimpanya).
+    # Batas sumber daya agar Hermes tidak merebut RAM/CPU dari MySQL banksampah
+    # (innodb-buffer-pool 1200M) & PostgreSQL ResikforSchools. Sesuaikan di .env.
+    mem_limit: ${HERMES_MEM_LIMIT:-3g}
+    cpus: ${HERMES_CPUS:-1.0}
+    shm_size: 1g # dibutuhkan Chromium bila tool browser dipakai
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m" # disk VPS kecil: log tidak boleh tumbuh tanpa batas
+        max-file: "3"
     networks:
       hermes-edge:
         aliases: [hermes-dashboard] # dipanggil Caddy: reverse_proxy hermes-dashboard:9119
 
 networks:
-  egress: {} # bridge biasa milik proyek ini (akses internet keluar saja)
   hermes-edge:
     external: true # dibuat sekali: docker network create hermes-edge (README langkah 1)

@@ -6,9 +6,9 @@ Internet ──► IP publik VPS :80/:443  (satu-satunya port terbuka, selain SS
         caddy_ssl  (milik banksampah-bsip-backend-FIX)
           │  jaringan "internal" 172.28.0.0/16 ── web_akun (banksampah)
           │  jaringan "proxy"    172.30.0.0/24 ── banksampahku-api / banksampahku-web (ResikforSchools)
-          │  jaringan "hermes-edge" (khusus)   ── hermes-dashboard:9119   (login 2 lapis)
+          │  jaringan "hermes-edge" (khusus)   ── hermes-gateway-1: gateway + dashboard :9119 (login 2 lapis)
           │
-  hermes-gateway ── jaringan "hermes_egress" ──► keluar saja: API LLM, Telegram (polling)
+  hermes-gateway-1 ──► keluar: API LLM, Telegram (polling)
           └── ./data  (HERMES_HOME: .env, config.yaml, memories, sessions)
 ```
 
@@ -125,7 +125,7 @@ Kirim pesan ke bot Telegram-mu. Kalau bot diam, cek ID-mu di `managed/.env` (ang
 **A. Lewat domain (Caddy yang sudah ada)**
 
 1. Isi `DASHBOARD_USER` dan `DASHBOARD_PASSWORD` (`openssl rand -hex 24`) di `.env`.
-2. Sudah ikut jalan di langkah 4 → `docker compose logs dashboard` tidak boleh error auth.
+2. Sudah ikut jalan di langkah 4 → `docker compose logs gateway | grep -i dashboard` tidak boleh error auth.
 3. DNS: record A `hermes.mufutirf.my.id` → IP VPS (Cloudflare: *DNS only* dulu).
 4. Buat hash password **lapis 1** (login Caddy) dan pasang di `caddy/hermes.caddy`:
    ```bash
@@ -152,7 +152,7 @@ Kirim pesan ke bot Telegram-mu. Kalau bot diam, cek ID-mu di `managed/.env` (ang
 **B. Tanpa domain (paling aman):** lewati langkah A.3–A.5 (tanpa DNS & Caddy), lalu tunnel SSH ke IP container-nya:
 
 ```bash
-docker inspect hermes-dashboard-1 --format '{{(index .NetworkSettings.Networks "hermes-edge").IPAddress}}'
+docker inspect hermes-gateway-1 --format '{{(index .NetworkSettings.Networks "hermes-edge").IPAddress}}'
 # di laptop (ganti IP_DASHBOARD dengan hasil di atas):
 ssh -i ~/.ssh/ssh_etos_oracle -L 9119:IP_DASHBOARD:9119 ubuntu@IP_VPS   # buka http://localhost:9119
 ```
@@ -170,13 +170,13 @@ curl -sI -u admin:PASSWORD_CADDY https://hermes.mufutirf.my.id | head -1
 curl -m 5 http://IP_VPS:9119 ; echo "exit=$?"       # harus timeout / connection refused
 ```
 
-Isolasi: kedua container tidak boleh mengenal proyek lain (harus muncul `gaierror`, bukan alamat IP):
+Isolasi: container Hermes tidak boleh mengenal proyek lain (harus muncul `gaierror`, bukan alamat IP):
 
 ```bash
-for s in gateway dashboard; do for h in banksampahku-api web_akun bsip_data; do
-  echo "$s -> $h: $(docker compose exec -T $s /opt/hermes/.venv/bin/python -c \
+for h in banksampahku-api web_akun bsip_data; do
+  echo "$h: $(docker compose exec -T gateway /opt/hermes/.venv/bin/python -c \
     "import socket; print(socket.gethostbyname('$h'))" 2>&1 | tail -1)"
-done; done
+done
 ```
 
 Kunci akses bot:
@@ -210,8 +210,8 @@ dan `docker compose logs gateway | grep -i unauthorized` mencatat penolakannya.
 - **Jangan** mount `/var/run/docker.sock` atau folder proyek lain ke container Hermes: agent bisa menjalankan
   perintah shell, jadi apa pun yang terlihat dari container bisa dibaca/dihapus olehnya.
 - **Jangan** jalankan dua gateway terhadap folder `data` yang sama (state.db SQLite bisa rusak).
-- Gateway **dan** dashboard sengaja tidak dimasukkan ke jaringan `proxy`/`internal`, jadi tidak bisa memanggil
-  `banksampahku-api`, `web_akun`, database, dll. Jangan tambahkan jaringan itu ke keduanya, dan jangan
+- Container Hermes sengaja tidak dimasukkan ke jaringan `proxy`/`internal`, jadi tidak bisa memanggil
+  `banksampahku-api`, `web_akun`, database, dll. Jangan tambahkan jaringan itu, dan jangan
   masukkan container lain selain `caddy_ssl` ke `hermes-edge`.
 - Login dashboard = akses menjalankan perintah (tab Chat) + melihat API key. Perlakukan passwordnya seperti
   password SSH.
