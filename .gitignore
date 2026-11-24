@@ -1,3 +1,4 @@
 # Rahasia & data agent — jangan pernah di-commit
 .env
 data/
+managed/

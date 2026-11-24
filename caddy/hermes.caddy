@@ -2,7 +2,7 @@
 # Jangan tambah blok global `{ ... }` kedua. Ganti domain dengan subdomain milikmu
 # (record A → IP publik VPS; di Cloudflare set "DNS only"/awan abu-abu dulu sampai sertifikat terbit).
 #
-# Syarat: caddy_ssl sudah tersambung ke jaringan "proxy" (lihat README langkah 1).
+# Syarat: caddy_ssl sudah tersambung ke jaringan "hermes-edge" (lihat README langkah 1).
 hermes.mufutirf.my.id {
 	encode zstd gzip
 

@@ -7,8 +7,9 @@
 #     di folder ini tidak menyentuh proyek lain.
 #   - TIDAK ADA `ports:`. Gateway cuma butuh koneksi KELUAR (API LLM + Telegram polling).
 #     Docker mem-bypass ufw/iptables, jadi port yang dipublish = langsung terbuka ke internet.
-#   - Dashboard hanya dijangkau caddy_ssl lewat jaringan "proxy" dengan alias unik
-#     "hermes-dashboard" (tidak tertukar dengan service "dashboard" milik proyek lain).
+#   - Dashboard hanya dijangkau caddy_ssl lewat jaringan KHUSUS "hermes-edge" (isinya cuma dashboard
+#     dan caddy_ssl). Sengaja bukan "proxy": tab Chat dashboard menjalankan agent di container ini,
+#     dan di "proxy" ia bisa memanggil banksampahku-api / banksampahku-web.
 #   - JANGAN mount /var/run/docker.sock: agent yang bisa menjalankan perintah akan jadi
 #     root di host → bisa membaca/menghapus database banksampah & ResikforSchools.
 #
@@ -22,6 +23,14 @@ x-hermes-common: &hermes-common
   volumes:
     # HERMES_HOME. Berisi .env (API key), config.yaml, memories/, sessions/, state.db
     - ./data:/opt/data
+    # Kunci akses bot (managed/.env): menang atas data/.env dan read-only, jadi agent tidak bisa mengubahnya.
+    # create_host_path: false → compose menolak start kalau folder managed/ belum dibuat.
+    - type: bind
+      source: ./managed
+      target: /etc/hermes
+      read_only: true
+      bind:
+        create_host_path: false
   environment:
     # Container start sebagai root lalu turun ke user ini; samakan dengan pemilik ./data
     HERMES_UID: ${HERMES_UID:?isi HERMES_UID di .env (hasil `id -u`)}
@@ -37,18 +46,7 @@ services:
   gateway:
     <<: *hermes-common
     command: ["gateway", "run"]
-    environment:
-      # (blok ini MENGGANTIKAN environment dari x-hermes-common, jadi UID/GID/TZ ditulis ulang)
-      HERMES_UID: ${HERMES_UID}
-      HERMES_GID: ${HERMES_GID}
-      TZ: Asia/Jakarta
-      # --- Auth bot: hanya ID di daftar ini yang dilayani (semua platform) ---
-      # Env proses menang atas config.yaml, jadi daftar ini tidak bisa dilonggarkan dari dalam data/.
-      GATEWAY_ALLOWED_USERS: ${HERMES_ALLOWED_USERS:?isi HERMES_ALLOWED_USERS di .env (ID Telegram/Discord kamu)}
-      # Kunci mati semua mode "izinkan semua orang"
-      GATEWAY_ALLOW_ALL_USERS: "false"
-      TELEGRAM_ALLOW_ALL_USERS: "false"
-      DISCORD_ALLOW_ALL_USERS: "false"
+    # Siapa yang boleh chat: lihat managed/.env (bukan environment: di sini, karena data/.env menimpanya).
     # Batas sumber daya agar Hermes tidak merebut RAM/CPU dari MySQL banksampah
     # (innodb-buffer-pool 1200M) & PostgreSQL ResikforSchools. Sesuaikan di .env.
     mem_limit: ${HERMES_MEM_LIMIT:-2g}
@@ -68,15 +66,15 @@ services:
       # (bind non-loopback tanpa auth = fail closed). Compose juga menolak start bila kosong.
       HERMES_DASHBOARD_BASIC_AUTH_USERNAME: ${DASHBOARD_USER:?isi DASHBOARD_USER di .env}
       HERMES_DASHBOARD_BASIC_AUTH_PASSWORD: ${DASHBOARD_PASSWORD:?isi DASHBOARD_PASSWORD di .env (openssl rand -hex 24)}
-    mem_limit: 512m
+    mem_limit: 1g # tab Chat menjalankan agent di container ini
     cpus: 0.5
     depends_on:
       - gateway
     networks:
-      proxy:
+      hermes-edge:
         aliases: [hermes-dashboard] # dipanggil Caddy: reverse_proxy hermes-dashboard:9119
 
 networks:
   egress: {} # bridge biasa milik proyek ini (akses internet keluar saja)
-  proxy:
-    external: true # sudah dibuat untuk ResikforSchools: docker network create --subnet 172.30.0.0/24 proxy
+  hermes-edge:
+    external: true # dibuat sekali: docker network create hermes-edge (README langkah 1)
