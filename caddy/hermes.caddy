@@ -1,0 +1,25 @@
+# Tempel di AKHIR Caddyfile milik banksampah-bsip-backend-FIX di VPS (dipakai container caddy_ssl).
+# Jangan tambah blok global `{ ... }` kedua. Ganti domain dengan subdomain milikmu
+# (record A → IP publik VPS; di Cloudflare set "DNS only"/awan abu-abu dulu sampai sertifikat terbit).
+#
+# Syarat: caddy_ssl sudah tersambung ke jaringan "proxy" (lihat README langkah 1).
+hermes.mufutirf.my.id {
+	encode zstd gzip
+
+	# Lapisan tambahan: batasi IP yang boleh membuka dashboard (opsional, hapus komentar & isi IP kamu)
+	# @luar not remote_ip 203.0.113.10/32
+	# respond @luar 403
+
+	# Lapis 1: login Caddy (popup browser) SEBELUM request sampai ke Hermes.
+	# Ganti HASH_BCRYPT dengan hasil: docker exec -it caddy_ssl caddy hash-password
+	# (diminta mengetik password, tidak tersimpan di history shell). Pakai username/password
+	# BERBEDA dari DASHBOARD_USER/DASHBOARD_PASSWORD (lapis 2 = halaman login Hermes).
+	basic_auth {
+		admin HASH_BCRYPT
+	}
+
+	reverse_proxy hermes-dashboard:9119 {
+		# Kredensial Caddy tidak perlu (dan tidak boleh) ikut sampai ke Hermes
+		header_up -Authorization
+	}
+}

@@ -1,0 +1,82 @@
+# Hermes Agent (NousResearch) di VPS Oracle yang DIPAKAI BERSAMA proyek lain:
+#   - banksampah-bsip-backend-FIX  → pemilik Caddy "caddy_ssl" (satu-satunya pemegang port 80/443)
+#   - ResikforSchools-Api          → ikut di belakang caddy_ssl lewat jaringan bersama "proxy"
+#
+# Prinsip (sama dengan ResikforSchools-Api/deploy/README.md):
+#   - name: hermes → container/jaringan/volume berawalan "hermes-", `docker compose down`
+#     di folder ini tidak menyentuh proyek lain.
+#   - TIDAK ADA `ports:`. Gateway cuma butuh koneksi KELUAR (API LLM + Telegram polling).
+#     Docker mem-bypass ufw/iptables, jadi port yang dipublish = langsung terbuka ke internet.
+#   - Dashboard hanya dijangkau caddy_ssl lewat jaringan "proxy" dengan alias unik
+#     "hermes-dashboard" (tidak tertukar dengan service "dashboard" milik proyek lain).
+#   - JANGAN mount /var/run/docker.sock: agent yang bisa menjalankan perintah akan jadi
+#     root di host → bisa membaca/menghapus database banksampah & ResikforSchools.
+#
+#   cp .env.example .env            # isi nilainya
+#   docker compose up -d            # gateway + dashboard
+name: hermes
+
+x-hermes-common: &hermes-common
+  image: ${HERMES_IMAGE:-nousresearch/hermes-agent:stable}
+  restart: unless-stopped
+  volumes:
+    # HERMES_HOME. Berisi .env (API key), config.yaml, memories/, sessions/, state.db
+    - ./data:/opt/data
+  environment:
+    # Container start sebagai root lalu turun ke user ini; samakan dengan pemilik ./data
+    HERMES_UID: ${HERMES_UID:?isi HERMES_UID di .env (hasil `id -u`)}
+    HERMES_GID: ${HERMES_GID:?isi HERMES_GID di .env (hasil `id -g`)}
+    TZ: Asia/Jakarta
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m" # disk VPS kecil: log tidak boleh tumbuh tanpa batas
+      max-file: "3"
+
+services:
+  gateway:
+    <<: *hermes-common
+    command: ["gateway", "run"]
+    environment:
+      # (blok ini MENGGANTIKAN environment dari x-hermes-common, jadi UID/GID/TZ ditulis ulang)
+      HERMES_UID: ${HERMES_UID}
+      HERMES_GID: ${HERMES_GID}
+      TZ: Asia/Jakarta
+      # --- Auth bot: hanya ID di daftar ini yang dilayani (semua platform) ---
+      # Env proses menang atas config.yaml, jadi daftar ini tidak bisa dilonggarkan dari dalam data/.
+      GATEWAY_ALLOWED_USERS: ${HERMES_ALLOWED_USERS:?isi HERMES_ALLOWED_USERS di .env (ID Telegram/Discord kamu)}
+      # Kunci mati semua mode "izinkan semua orang"
+      GATEWAY_ALLOW_ALL_USERS: "false"
+      TELEGRAM_ALLOW_ALL_USERS: "false"
+      DISCORD_ALLOW_ALL_USERS: "false"
+    # Batas sumber daya agar Hermes tidak merebut RAM/CPU dari MySQL banksampah
+    # (innodb-buffer-pool 1200M) & PostgreSQL ResikforSchools. Sesuaikan di .env.
+    mem_limit: ${HERMES_MEM_LIMIT:-2g}
+    cpus: ${HERMES_CPUS:-1.0}
+    shm_size: 1g # dibutuhkan Chromium bila tool browser dipakai
+    networks:
+      - egress
+
+  dashboard:
+    <<: *hermes-common
+    command: ["dashboard", "--host", "0.0.0.0", "--no-open"]
+    environment:
+      HERMES_UID: ${HERMES_UID}
+      HERMES_GID: ${HERMES_GID}
+      TZ: Asia/Jakarta
+      # Dashboard menyimpan API key → WAJIB auth. Tanpa ini Hermes menolak start
+      # (bind non-loopback tanpa auth = fail closed). Compose juga menolak start bila kosong.
+      HERMES_DASHBOARD_BASIC_AUTH_USERNAME: ${DASHBOARD_USER:?isi DASHBOARD_USER di .env}
+      HERMES_DASHBOARD_BASIC_AUTH_PASSWORD: ${DASHBOARD_PASSWORD:?isi DASHBOARD_PASSWORD di .env (openssl rand -hex 24)}
+    mem_limit: 512m
+    cpus: 0.5
+    depends_on:
+      - gateway
+    networks:
+      proxy:
+        aliases: [hermes-dashboard] # dipanggil Caddy: reverse_proxy hermes-dashboard:9119
+
+networks:
+  egress: {} # bridge biasa milik proyek ini (akses internet keluar saja)
+  proxy:
+    external: true # sudah dibuat untuk ResikforSchools: docker network create --subnet 172.30.0.0/24 proxy
