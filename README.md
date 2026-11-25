@@ -223,6 +223,27 @@ dan `docker compose logs gateway | grep -i unauthorized` mencatat penolakannya.
 `REQUIRE_API_KEY` di README 9Router tidak dibaca kodenya (0.5.123); yang berlaku adalah tombol di menu Endpoint.
 Jangan aktifkan fitur Tunnel/Tailscale/Cloud di 9Router: itu membukanya ke internet.
 
+## 5d. Proxy Cloudflare (awan oranye) untuk Hermes & 9Router
+
+Template di `caddy/` memakai Origin Certificate Cloudflare dan menolak koneksi yang tidak lewat Cloudflare.
+Petunjuk *DNS only* di langkah 5 dan 5c hanya untuk cara lama (sertifikat Let's Encrypt).
+
+1. Cloudflare → SSL/TLS → Origin Server → Create Certificate (RSA, 15 tahun) untuk kedua hostname. Simpan sebagai
+   `cert.pem` dan `key.pem`, lalu salin ke volume Caddy:
+   ```bash
+   docker exec caddy_ssl mkdir -p /data/cf-origin
+   docker cp cert.pem caddy_ssl:/data/cf-origin/cert.pem && docker cp key.pem caddy_ssl:/data/cf-origin/key.pem
+   docker exec caddy_ssl sh -c 'chown root:root /data/cf-origin/*; chmod 700 /data/cf-origin; chmod 600 /data/cf-origin/*'
+   ```
+2. Mode SSL untuk kedua hostname: **Full (strict)** (pakai Configuration Rule supaya subdomain lain tidak berubah).
+   Cache Rule: **Bypass cache** untuk kedua hostname.
+3. Ubah kedua record DNS ke **Proxied**, lalu pasang bloknya:
+   ```bash
+   bash caddy/pasang-situs.sh hermes.mufutirf.my.id caddy/hermes.caddy
+   bash caddy/pasang-situs.sh 9router.mufutirf.my.id caddy/9router.caddy
+   ```
+Kembali ke awan abu-abu = hapus baris `tls` dan `abort` dulu, kalau tidak situsnya tidak bisa dibuka.
+
 ## 6. Operasional (di `/opt/hermes-agent`)
 
 | Tugas | Perintah |

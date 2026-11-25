@@ -1,17 +1,26 @@
-# Dashboard 9Router. Dipasang ke Caddyfile milik caddy_ssl memakai skrip di README 5c (jangan `>>` manual).
-# DNS: record A → IP publik VPS, Cloudflare "DNS only".
+# Dashboard 9Router di belakang proxy Cloudflare (awan oranye). Pasang dengan (jangan `>>` manual):
+#   bash caddy/pasang-situs.sh 9router.mufutirf.my.id caddy/9router.caddy
+# Syarat: Origin Certificate Cloudflare ada di /data/cf-origin dalam container caddy_ssl (README 5d).
 9router.mufutirf.my.id {
-	encode zstd gzip
+	# Sertifikat ini hanya dipercaya Cloudflare: kalau awannya jadi abu-abu, browser akan menolak.
+	tls /data/cf-origin/cert.pem /data/cf-origin/key.pem
 
-	# Lapis 1: login Caddy. Lapis 2: login 9Router (ROUTER_PASSWORD).
-	# Menutup SEMUA jalur termasuk /v1, jadi API-nya tidak bisa dipakai dari luar.
-	# Hermes tidak lewat sini: ia memanggil http://9router:20128/v1 di jaringan internal.
-	basic_auth {
-		admin HASH_BCRYPT
-	}
+	route {
+		# Tolak yang tidak lewat Cloudflare (akses langsung ke IP VPS). Daftar: cloudflare.com/ips-v4
+		@bukan_cloudflare not remote_ip 173.245.48.0/20 103.21.244.0/22 103.22.200.0/22 103.31.4.0/22 141.101.64.0/18 108.162.192.0/18 190.93.240.0/20 188.114.96.0/20 197.234.240.0/22 198.41.128.0/17 162.158.0.0/15 104.16.0.0/13 104.24.0.0/14 172.64.0.0/13 131.0.72.0/22
+		abort @bukan_cloudflare
 
-	reverse_proxy hermes-9router:20128 {
-		# Kredensial Caddy tidak perlu (dan tidak boleh) ikut sampai ke 9Router
-		header_up -Authorization
+		# Lapis 1: login Caddy. Lapis 2: login 9Router (ROUTER_PASSWORD).
+		# Menutup SEMUA jalur termasuk /v1, jadi API-nya tidak bisa dipakai dari luar.
+		# Hermes tidak lewat sini: ia memanggil http://9router:20128/v1 di jaringan internal.
+		basic_auth {
+			admin HASH_BCRYPT
+		}
+
+		encode zstd gzip
+		reverse_proxy hermes-9router:20128 {
+			# Kredensial Caddy tidak perlu (dan tidak boleh) ikut sampai ke 9Router
+			header_up -Authorization
+		}
 	}
 }
