@@ -15,7 +15,7 @@
 #     root di host → bisa membaca/menghapus database banksampah & ResikforSchools.
 #
 #   cp .env.example .env            # isi nilainya
-#   docker compose up -d            # gateway + dashboard
+#   docker compose up -d            # gateway + dashboard + 9router
 name: hermes
 
 services:
@@ -59,7 +59,33 @@ services:
     networks:
       hermes-edge:
         aliases: [hermes-dashboard] # dipanggil Caddy: reverse_proxy hermes-dashboard:9119
+      router: {} # jalur ke http://9router:20128/v1
+
+  # Penghubung ke provider AI. Hermes memanggil http://9router:20128/v1 dengan API key buatan 9Router.
+  # TIDAK ADA `ports:` → dashboard-nya dibuka lewat tunnel SSH saja (README 5c), jangan lewat Caddy.
+  9router:
+    image: decolua/9router:0.5.123
+    restart: unless-stopped
+    volumes:
+      - ./router-data:/app/data # database: akun provider, API key, setting
+    environment:
+      DATA_DIR: /app/data
+      TZ: Asia/Jakarta
+      # Tanpa ini password login-nya "123456"
+      INITIAL_PASSWORD: ${ROUTER_PASSWORD:?isi ROUTER_PASSWORD di .env (openssl rand -hex 24)}
+      # Tanpa ini API key dibuat dengan kunci bawaan yang diketahui umum. Jangan diganti setelah dipakai.
+      API_KEY_SECRET: ${ROUTER_API_KEY_SECRET:?isi ROUTER_API_KEY_SECRET di .env (openssl rand -hex 32)}
+    mem_limit: 1g
+    cpus: 0.5
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - router
 
 networks:
+  router: {} # hanya Hermes ↔ 9Router (punya akses keluar ke provider AI)
   hermes-edge:
     external: true # dibuat sekali: docker network create hermes-edge (README langkah 1)

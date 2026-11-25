@@ -8,7 +8,8 @@ Internet ──► IP publik VPS :80/:443  (satu-satunya port terbuka, selain SS
           │  jaringan "proxy"    172.30.0.0/24 ── banksampahku-api / banksampahku-web (ResikforSchools)
           │  jaringan "hermes-edge" (khusus)   ── hermes-gateway-1: gateway + dashboard :9119 (login 2 lapis)
           │
-  hermes-gateway-1 ──► keluar: API LLM, Telegram (polling)
+  hermes-gateway-1 ── jaringan "router" ── hermes-9router-1:20128 ──► keluar: provider AI
+          │ ──► keluar: Telegram (polling)
           └── ./data  (HERMES_HOME: .env, config.yaml, memories, sessions)
 ```
 
@@ -192,6 +193,33 @@ docker compose exec -T gateway sh -c 'touch /etc/hermes/uji'
 Bot: minta teman (ID yang **tidak** ada di `managed/.env`) mengirim pesan ke bot → tidak dibalas,
 dan `docker compose logs gateway | grep -i unauthorized` mencatat penolakannya.
 
+## 5c. 9Router (provider AI untuk Hermes)
+
+1. Isi `ROUTER_PASSWORD` dan `ROUTER_API_KEY_SECRET` di `.env`, lalu `docker compose up -d`.
+2. Buka dashboard lewat tunnel SSH:
+   ```bash
+   docker inspect hermes-9router-1 --format '{{(index .NetworkSettings.Networks "hermes_router").IPAddress}}'
+   # di laptop (ganti IP_ROUTER):
+   ssh -i ~/.ssh/ssh_etos_oracle -L 20128:IP_ROUTER:20128 ubuntu@IP_VPS   # buka http://localhost:20128
+   ```
+   Login dengan `ROUTER_PASSWORD`. IP bisa berubah setelah container dibuat ulang.
+3. Menu **Providers**: sambungkan provider. Menu **Endpoint**: buat API key khusus Hermes, dan pastikan
+   **Require API key** menyala.
+4. Sambungkan Hermes:
+   ```bash
+   cp data/config.yaml data/config.yaml.bak-sebelum-9router
+   docker compose exec gateway hermes model        # pilih "Custom endpoint"
+   #   Base URL : http://9router:20128/v1
+   #   API key  : API key dari langkah 3
+   #   Model    : salin nama lengkap dari dashboard 9Router, konteks minimal 64K
+   docker compose restart gateway
+   ```
+5. Kembali ke provider lama: `cat data/config.yaml.bak-sebelum-9router > data/config.yaml` lalu
+   `docker compose restart gateway`.
+
+`REQUIRE_API_KEY` di README 9Router tidak dibaca kodenya (0.5.123); yang berlaku adalah tombol di menu Endpoint.
+Jangan aktifkan fitur Tunnel/Tailscale/Cloud di 9Router: itu membukanya ke internet.
+
 ## 6. Operasional (di `/opt/hermes-agent`)
 
 | Tugas | Perintah |
@@ -201,7 +229,7 @@ dan `docker compose logs gateway | grep -i unauthorized` mencatat penolakannya.
 | Ganti password dashboard | lapis 1: hash baru di Caddyfile banksampah → `caddy reload`; lapis 2: `DASHBOARD_PASSWORD` di `.env` → `docker compose up -d` |
 | Ubah setting | `docker compose exec gateway hermes config set KUNCI nilai` lalu `docker compose restart gateway` |
 | Update | ganti tag di `.env` → `docker compose pull && docker compose up -d` |
-| Backup | `docker compose stop && tar czf hermes-$(date +%F).tgz data managed .env && docker compose start` |
+| Backup | `docker compose stop && tar czf hermes-$(date +%F).tgz data managed router-data .env; docker compose start` |
 | Hentikan | `docker compose down` (data aman di `./data`, proyek lain tidak tersentuh) |
 
 ## 7. Aturan keamanan
