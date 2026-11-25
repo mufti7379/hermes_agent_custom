@@ -1,0 +1,17 @@
+# Dashboard 9Router. Dipasang ke Caddyfile milik caddy_ssl memakai skrip di README 5c (jangan `>>` manual).
+# DNS: record A → IP publik VPS, Cloudflare "DNS only".
+9router.mufutirf.my.id {
+	encode zstd gzip
+
+	# Lapis 1: login Caddy. Lapis 2: login 9Router (ROUTER_PASSWORD).
+	# Menutup SEMUA jalur termasuk /v1, jadi API-nya tidak bisa dipakai dari luar.
+	# Hermes tidak lewat sini: ia memanggil http://9router:20128/v1 di jaringan internal.
+	basic_auth {
+		admin HASH_BCRYPT
+	}
+
+	reverse_proxy hermes-9router:20128 {
+		# Kredensial Caddy tidak perlu (dan tidak boleh) ikut sampai ke 9Router
+		header_up -Authorization
+	}
+}

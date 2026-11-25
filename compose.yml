@@ -9,7 +9,7 @@
 #     Docker mem-bypass ufw/iptables, jadi port yang dipublish = langsung terbuka ke internet.
 #   - Gateway + dashboard SATU container: dashboard hanya bisa melihat status gateway kalau berbagi ruang
 #     proses. Kalau dipisah, statusnya selalu "stopped" walaupun bot hidup.
-#   - Hanya dijangkau caddy_ssl lewat jaringan KHUSUS "hermes-edge" (isinya cuma container ini dan caddy_ssl).
+#   - Hanya dijangkau caddy_ssl lewat jaringan KHUSUS "hermes-edge" (isinya cuma Hermes, 9Router, caddy_ssl).
 #     Sengaja bukan "proxy": di sana agent bisa memanggil banksampahku-api / banksampahku-web.
 #   - JANGAN mount /var/run/docker.sock: agent yang bisa menjalankan perintah akan jadi
 #     root di host → bisa membaca/menghapus database banksampah & ResikforSchools.
@@ -62,7 +62,7 @@ services:
       router: {} # jalur ke http://9router:20128/v1
 
   # Penghubung ke provider AI. Hermes memanggil http://9router:20128/v1 dengan API key buatan 9Router.
-  # TIDAK ADA `ports:` → dashboard-nya dibuka lewat tunnel SSH saja (README 5c), jangan lewat Caddy.
+  # TIDAK ADA `ports:` → dashboard-nya dibuka lewat Caddy (login 2 lapis) atau tunnel SSH (README 5c).
   9router:
     image: decolua/9router:0.5.123
     restart: unless-stopped
@@ -83,9 +83,11 @@ services:
         max-size: "10m"
         max-file: "3"
     networks:
-      - router
+      router: {}
+      hermes-edge:
+        aliases: [hermes-9router] # dipanggil Caddy: reverse_proxy hermes-9router:20128
 
 networks:
-  router: {} # hanya Hermes ↔ 9Router (punya akses keluar ke provider AI)
+  router: {} # Hermes ↔ 9Router
   hermes-edge:
     external: true # dibuat sekali: docker network create hermes-edge (README langkah 1)

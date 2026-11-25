@@ -196,7 +196,10 @@ dan `docker compose logs gateway | grep -i unauthorized` mencatat penolakannya.
 ## 5c. 9Router (provider AI untuk Hermes)
 
 1. Isi `ROUTER_PASSWORD` dan `ROUTER_API_KEY_SECRET` di `.env`, lalu `docker compose up -d`.
-2. Buka dashboard lewat tunnel SSH:
+2. Buka dashboard. Lewat domain: buat record A `9router.mufutirf.my.id` → IP VPS (*DNS only*), ganti `HASH_BCRYPT`
+   di `caddy/9router.caddy`, lalu jalankan `bash caddy/pasang-situs.sh 9router.mufutirf.my.id caddy/9router.caddy`.
+   Skrip itu memvalidasi salinan dulu; kalau tidak valid, Caddyfile asli tidak disentuh.
+   **Jangan** buka lewat `http://IP:20128` (tanpa HTTPS, melewati Caddy). Atau lewat tunnel SSH:
    ```bash
    docker inspect hermes-9router-1 --format '{{(index .NetworkSettings.Networks "hermes_router").IPAddress}}'
    # di laptop (ganti IP_ROUTER):
